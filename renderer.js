@@ -444,6 +444,230 @@ window.electronAPI.onProgress((data) => {
                 }
             }
         }
+        
+        // Update version management progress
+        if (data.percentage !== undefined) {
+            const versionProgressContainer = document.getElementById('version-progress-container');
+            const versionProgressFill = document.getElementById('version-progress-fill');
+            const versionStatusText = document.getElementById('version-status-text');
+            
+            if (versionProgressContainer && versionProgressFill && versionStatusText) {
+                versionProgressFill.style.width = `${data.percentage}%`;
+                versionStatusText.textContent = data.message || `Progress: ${data.percentage.toFixed(1)}%`;
+                
+                // Add log entry for version management
+                const versionLog = document.getElementById('version-log');
+                if (data.message && versionLog) {
+                    let logType = data.error ? 'error' : 'info';
+                    if (data.message.includes('successfully') || data.message.includes('✓')) {
+                        logType = 'success';
+                    } else if (data.message.includes('Error') || data.message.includes('✗')) {
+                        logType = 'error';
+                    }
+                    addLogEntry(data.message, logType, versionLog);
+                }
+            }
+        }
+    }
+});
+
+// Tab 3: Version Management
+const fetchVersionsBtn = document.getElementById('fetch-versions');
+const promoteVersionBtn = document.getElementById('promote-version');
+const browseLocalManifestVersionBtn = document.getElementById('browse-local-manifest-version');
+const versionSelect = document.getElementById('version-select');
+const localManifestVersionInput = document.getElementById('local-manifest-version');
+const versionProgressContainer = document.getElementById('version-progress-container');
+const versionProgressFill = document.getElementById('version-progress-fill');
+const versionStatusText = document.getElementById('version-status-text');
+const versionLog = document.getElementById('version-log');
+
+// Helper function to add log entries
+function addLogEntry(message, type = 'info', logContainer = null) {
+    if (!logContainer) return;
+    
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    logContainer.appendChild(entry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+// Fetch versions from R2
+fetchVersionsBtn.addEventListener('click', async () => {
+    const buildType = document.getElementById('build-type-version').value;
+    const config = {
+        bucket: document.getElementById('r2-bucket-version').value,
+        endpoint: document.getElementById('r2-endpoint-version').value,
+        accessKeyId: document.getElementById('r2-access-key-version').value,
+        secretAccessKey: document.getElementById('r2-secret-key-version').value
+    };
+    
+    if (!config.bucket || !config.endpoint || !config.accessKeyId || !config.secretAccessKey) {
+        alert('Please fill in all R2 configuration fields');
+        return;
+    }
+    
+    fetchVersionsBtn.disabled = true;
+    versionSelect.disabled = true;
+    versionStatusText.textContent = 'Fetching versions from R2...';
+    versionSelect.innerHTML = '<option value="">Loading...</option>';
+    
+    try {
+        const result = await window.electronAPI.listVersions({ config, buildType });
+        
+        if (result.success && result.versions && result.versions.length > 0) {
+            versionSelect.innerHTML = '<option value="">Select a version...</option>';
+            result.versions.forEach(version => {
+                const option = document.createElement('option');
+                option.value = version;
+                // Mark current version with indicator
+                if (result.currentVersion && version === result.currentVersion) {
+                    option.textContent = `${version} (Current)`;
+                    option.style.fontWeight = 'bold';
+                } else {
+                    option.textContent = version;
+                }
+                versionSelect.appendChild(option);
+            });
+            versionSelect.disabled = false;
+            promoteVersionBtn.disabled = false;
+            
+            // Show status with current version info
+            let statusMessage = `Found ${result.versions.length} version(s)`;
+            if (result.currentVersion) {
+                statusMessage += ` | Current: ${result.currentVersion}`;
+            }
+            versionStatusText.textContent = statusMessage;
+            
+            let logMessage = `Successfully fetched ${result.versions.length} version(s)`;
+            if (result.currentVersion) {
+                logMessage += ` (Current version: ${result.currentVersion})`;
+            }
+            addLogEntry(logMessage, 'success', versionLog);
+        } else {
+            versionSelect.innerHTML = '<option value="">No versions found</option>';
+            let statusMessage = 'No versions found in R2';
+            if (result.currentVersion) {
+                statusMessage += ` | Current: ${result.currentVersion}`;
+            }
+            versionStatusText.textContent = statusMessage;
+            addLogEntry('No versions found in R2 for the selected build type', 'warning', versionLog);
+        }
+    } catch (error) {
+        console.error('Error fetching versions:', error);
+        versionSelect.innerHTML = '<option value="">Error fetching versions</option>';
+        versionStatusText.textContent = `Error: ${error.message || 'Failed to fetch versions'}`;
+        addLogEntry(`Error fetching versions: ${error.message || 'Unknown error'}`, 'error', versionLog);
+        alert(`Error fetching versions: ${error.message || 'Unknown error'}`);
+    } finally {
+        fetchVersionsBtn.disabled = false;
+    }
+});
+
+// Browse local manifest file
+browseLocalManifestVersionBtn.addEventListener('click', async () => {
+    const path = await window.electronAPI.selectFile({
+        filters: [{ name: 'JSON Files', extensions: ['json'] }]
+    });
+    if (path) {
+        localManifestVersionInput.value = path;
+    }
+});
+
+// Promote version
+promoteVersionBtn.addEventListener('click', async () => {
+    const buildType = document.getElementById('build-type-version').value;
+    const selectedVersion = versionSelect.value;
+    const localManifestPath = localManifestVersionInput.value;
+    
+    if (!selectedVersion && !localManifestPath) {
+        alert('Please select a version from the dropdown or provide a local manifest file');
+        return;
+    }
+    
+    const config = {
+        bucket: document.getElementById('r2-bucket-version').value,
+        endpoint: document.getElementById('r2-endpoint-version').value,
+        accessKeyId: document.getElementById('r2-access-key-version').value,
+        secretAccessKey: document.getElementById('r2-secret-key-version').value
+    };
+    
+    if (!config.bucket || !config.endpoint || !config.accessKeyId || !config.secretAccessKey) {
+        alert('Please fill in all R2 configuration fields');
+        return;
+    }
+    
+    // Determine version to promote and whether to use local manifest
+    let versionToPromote = selectedVersion;
+    let localManifestPathToUse = null;
+    
+    if (localManifestPath) {
+        // If local manifest is provided, read it and extract version
+        try {
+            const manifestData = await window.electronAPI.readFile(localManifestPath);
+            const manifest = JSON.parse(manifestData);
+            const manifestVersion = manifest.version;
+            
+            if (!manifestVersion) {
+                alert('Local manifest file does not contain a version field');
+                return;
+            }
+            
+            // If version is also selected, verify they match
+            if (selectedVersion && selectedVersion !== manifestVersion) {
+                const useLocal = confirm(
+                    `Local manifest version (${manifestVersion}) differs from selected version (${selectedVersion}). ` +
+                    `Use local manifest version?`
+                );
+                if (!useLocal) {
+                    return;
+                }
+            }
+            
+            versionToPromote = manifestVersion;
+            localManifestPathToUse = localManifestPath;
+            addLogEntry(`Using local manifest file. Version: ${versionToPromote}`, 'info', versionLog);
+        } catch (error) {
+            alert(`Error reading local manifest: ${error.message}`);
+            return;
+        }
+    }
+    
+    if (!versionToPromote) {
+        alert('Please select a version from the dropdown or provide a local manifest file');
+        return;
+    }
+    
+    promoteVersionBtn.disabled = true;
+    versionProgressContainer.classList.add('active');
+    versionProgressFill.style.width = '0%';
+    versionStatusText.textContent = 'Starting version promotion...';
+    versionLog.innerHTML = '';
+    addLogEntry(`Starting promotion of version ${versionToPromote} (${buildType})...`, 'info', versionLog);
+    
+    try {
+        const result = await window.electronAPI.promoteVersion({
+            config,
+            version: versionToPromote,
+            buildType,
+            localManifestPath: localManifestPathToUse
+        });
+        
+        if (result.success) {
+            versionStatusText.textContent = result.message || `Version ${versionToPromote} successfully promoted!`;
+            addLogEntry(result.message || `Version ${versionToPromote} successfully promoted!`, 'success', versionLog);
+            alert(`Success! ${result.message || `Version ${versionToPromote} has been promoted as the latest ${buildType} version.`}`);
+        } else {
+            throw new Error(result.error || 'Unknown error');
+        }
+    } catch (error) {
+        console.error('Error promoting version:', error);
+        versionStatusText.textContent = `Error: ${error.message || 'Failed to promote version'}`;
+        addLogEntry(`Error: ${error.message || 'Failed to promote version'}`, 'error', versionLog);
+        alert(`Error promoting version: ${error.message || 'Unknown error'}`);
+    } finally {
+        promoteVersionBtn.disabled = false;
     }
 });
 

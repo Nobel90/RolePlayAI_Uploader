@@ -637,6 +637,10 @@
                     <div class="nav-item-icon">↑</div>
                     <span>Upload Management</span>
                 </div>
+                <div class="nav-item" data-tab="version-management">
+                    <div class="nav-item-icon">📌</div>
+                    <span>Version Management</span>
+                </div>
             </nav>
         </div>
 
@@ -843,6 +847,85 @@
 
                     <div class="log-container" id="upload-log"></div>
                 </div>
+
+                <!-- Tab 3: Version Management -->
+                <div class="tab-panel" id="version-management">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Build Configuration</div>
+                            <div class="card-subtitle">Select the build environment for version promotion</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Build Type</label>
+                            <select id="build-type-version">
+                                <option value="production">Production</option>
+                                <option value="staging">Staging</option>
+                            </select>
+                            <small>Select the build environment. Only versions from this build type will be listed.</small>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">R2 Configuration</div>
+                            <div class="card-subtitle">Cloudflare R2 bucket credentials</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Bucket Name</label>
+                            <input type="text" id="r2-bucket-version" placeholder="Bucket Name" value="vrcentre-roleplay-ai-bucket">
+                        </div>
+                        <div class="form-group">
+                            <label>Endpoint URL</label>
+                            <input type="text" id="r2-endpoint-version" placeholder="Endpoint URL" value="https://d9f8ae13b4516b91e13fe7a672fe51b9.r2.cloudflarestorage.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Access Key ID</label>
+                            <input type="text" id="r2-access-key-version" placeholder="Access Key ID" value="14035e40922cc1e4f1b13de3e4d576cc">
+                        </div>
+                        <div class="form-group">
+                            <label>Secret Access Key</label>
+                            <input type="password" id="r2-secret-key-version" placeholder="Secret Access Key" value="26673b037116036156792cfd76198aa5987e6731f4f6501a74f9dde9338b8a9b">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Version Selection</div>
+                            <div class="card-subtitle">Select a version to promote as the current/latest version</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Available Versions</label>
+                            <div class="input-group">
+                                <select id="version-select" disabled>
+                                    <option value="">Click "Fetch Versions" to load available versions</option>
+                                </select>
+                                <button class="btn btn-secondary" id="fetch-versions">Fetch Versions</button>
+                            </div>
+                            <small>Fetches all available versions from R2 for the selected build type.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Or Use Local Manifest File (Optional)</label>
+                            <div class="input-group">
+                                <input type="text" id="local-manifest-version" placeholder="Select local manifest file..." readonly>
+                                <button class="btn btn-secondary" id="browse-local-manifest-version">Browse</button>
+                            </div>
+                            <small>If provided, this local manifest will be used instead of fetching from R2. Chunks will still be verified in R2.</small>
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn" id="promote-version" disabled>Promote Version</button>
+                    </div>
+
+                    <div class="progress-container" id="version-progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="version-progress-fill"></div>
+                        </div>
+                        <div class="status-text" id="version-status-text">Ready to promote version...</div>
+                    </div>
+
+                    <div class="log-container" id="version-log"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -894,7 +977,8 @@
                 // Update content title
                 const titles = {
                     'package-prep': 'Package Preparation',
-                    'upload': 'Upload Management'
+                    'upload': 'Upload Management',
+                    'version-management': 'Version Management'
                 };
                 document.getElementById('content-title').textContent = titles[tabName];
             });

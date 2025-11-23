@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     resumeUpload: () => ipcRenderer.invoke('resume-upload'),
     verifyUpload: (options) => ipcRenderer.invoke('verify-upload', options),
     
+    // Version management
+    listVersions: (options) => ipcRenderer.invoke('list-versions', options),
+    promoteVersion: (options) => ipcRenderer.invoke('promote-version', options),
+    
     // Progress events
     onProgress: (callback) => {
         ipcRenderer.on('progress-update', (event, data) => callback(data));

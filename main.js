@@ -252,3 +252,55 @@ ipcMain.handle('verify-upload', async (event, options) => {
     }
 });
 
+// List available versions from R2
+ipcMain.handle('list-versions', async (event, options) => {
+    try {
+        const { config, buildType = 'production' } = options;
+        const { R2Uploader } = require('./src/r2Uploader');
+        
+        const uploader = new R2Uploader(config);
+        const result = await uploader.listVersions(buildType);
+        
+        return { 
+            success: true, 
+            versions: result.versions,
+            currentVersion: result.currentVersion
+        };
+    } catch (error) {
+        console.error('Error listing versions:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Promote a version as the current/latest version
+ipcMain.handle('promote-version', async (event, options) => {
+    try {
+        const { config, version, buildType = 'production', localManifestPath = null } = options;
+        const { R2Uploader } = require('./src/r2Uploader');
+        
+        const sendProgress = (data) => {
+            mainWindow.webContents.send('progress-update', data);
+        };
+        
+        let localManifest = null;
+        
+        // If local manifest path is provided, read it
+        if (localManifestPath) {
+            try {
+                const manifestData = await fs.readFile(localManifestPath, 'utf-8');
+                localManifest = JSON.parse(manifestData);
+            } catch (error) {
+                throw new Error(`Failed to read local manifest: ${error.message}`);
+            }
+        }
+        
+        const uploader = new R2Uploader(config);
+        const result = await uploader.promoteVersion(version, buildType, sendProgress, localManifest);
+        
+        return { success: true, ...result };
+    } catch (error) {
+        console.error('Error promoting version:', error);
+        return { success: false, error: error.message };
+    }
+});
+

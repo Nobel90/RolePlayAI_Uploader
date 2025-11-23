@@ -1,7 +1,7 @@
 // r2Uploader.js
 // R2 upload client using AWS SDK for Cloudflare R2
 
-const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -435,6 +435,264 @@ class R2Uploader {
         }
         
         return results;
+    }
+    
+    /**
+     * List all available versions in R2 for a given build type
+     * @param {string} buildType - Build type (production/staging)
+     * @returns {Promise<{versions: string[], currentVersion: string|null}>} Object with versions array and current version
+     */
+    async listVersions(buildType = 'production') {
+        try {
+            const versions = new Set();
+            let continuationToken = undefined;
+            
+            do {
+                const listCommand = new ListObjectsV2Command({
+                    Bucket: this.config.bucket,
+                    Prefix: `${buildType}/`,
+                    Delimiter: '/'
+                });
+                
+                const response = await this.client.send(listCommand);
+                
+                // Process common prefixes (version folders)
+                if (response.CommonPrefixes && response.CommonPrefixes.length > 0) {
+                    console.log(`[R2Uploader] Found ${response.CommonPrefixes.length} common prefixes`);
+                    for (const prefix of response.CommonPrefixes) {
+                        // Extract version from prefix like "production/1.0.1.4/"
+                        const prefixStr = prefix.Prefix || prefix;
+                        const match = prefixStr.match(new RegExp(`${buildType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/([^/]+)/`));
+                        if (match && match[1]) {
+                            const version = match[1];
+                            // Skip if it's not a version folder (e.g., "roleplayai_manifest.json" would be in Contents, not CommonPrefixes)
+                            if (version === 'roleplayai_manifest.json') {
+                                continue;
+                            }
+                            // Verify manifest exists for this version
+                            const manifestKey = `${buildType}/${version}/manifest.json`;
+                            const manifestExists = await this.objectExists(manifestKey);
+                            if (manifestExists) {
+                                versions.add(version);
+                                console.log(`[R2Uploader] Found version: ${version}`);
+                            } else {
+                                console.log(`[R2Uploader] Version ${version} found but manifest doesn't exist`);
+                            }
+                        } else {
+                            console.log(`[R2Uploader] Could not extract version from prefix: ${prefixStr}`);
+                        }
+                    }
+                } else {
+                    console.log('[R2Uploader] No common prefixes found in response');
+                    // Fallback: try to list Contents and extract versions from keys
+                    if (response.Contents && response.Contents.length > 0) {
+                        console.log(`[R2Uploader] Trying fallback: checking ${response.Contents.length} objects`);
+                        for (const obj of response.Contents) {
+                            const key = obj.Key;
+                            // Match pattern: production/version/manifest.json
+                            const match = key.match(new RegExp(`${buildType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/([^/]+)/manifest\\.json$`));
+                            if (match && match[1]) {
+                                const version = match[1];
+                                versions.add(version);
+                                console.log(`[R2Uploader] Found version from Contents: ${version}`);
+                            }
+                        }
+                    }
+                }
+                
+                continuationToken = response.NextContinuationToken;
+            } while (continuationToken);
+            
+            // Sort versions (simple string sort, can be improved with semver parsing)
+            const sortedVersions = Array.from(versions).sort((a, b) => {
+                // Try to parse as version numbers for better sorting
+                const aParts = a.split('.').map(Number);
+                const bParts = b.split('.').map(Number);
+                for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                    const aPart = aParts[i] || 0;
+                    const bPart = bParts[i] || 0;
+                    if (aPart !== bPart) {
+                        return bPart - aPart; // Descending order (newest first)
+                    }
+                }
+                return b.localeCompare(a); // Fallback to string comparison
+            });
+            
+            // Try to get the current/latest version from the latest manifest
+            let currentVersion = null;
+            try {
+                const latestKey = `${buildType}/roleplayai_manifest.json`;
+                const latestExists = await this.objectExists(latestKey);
+                if (latestExists) {
+                    const latestManifest = await this.getManifest(null, buildType, latestKey);
+                    if (latestManifest && latestManifest.version) {
+                        currentVersion = latestManifest.version;
+                    }
+                }
+            } catch (error) {
+                // If latest manifest doesn't exist or can't be read, that's okay
+                console.log('[R2Uploader] Could not determine current version:', error.message);
+            }
+            
+            return {
+                versions: sortedVersions,
+                currentVersion: currentVersion
+            };
+        } catch (error) {
+            console.error('[R2Uploader] Error listing versions:', error);
+            throw new Error(`Failed to list versions: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Get manifest from R2 for a specific version
+     * @param {string} version - Version string (e.g., "1.0.1.4") or null to use custom key
+     * @param {string} buildType - Build type (production/staging)
+     * @param {string} customKey - Optional custom key (used when version is null, e.g., for latest manifest)
+     * @returns {Promise<Object>} Parsed manifest object
+     */
+    async getManifest(version, buildType = 'production', customKey = null) {
+        try {
+            const manifestKey = customKey || `${buildType}/${version}/manifest.json`;
+            
+            const getCommand = new GetObjectCommand({
+                Bucket: this.config.bucket,
+                Key: manifestKey
+            });
+            
+            const response = await this.client.send(getCommand);
+            
+            // Read the stream
+            const chunks = [];
+            for await (const chunk of response.Body) {
+                chunks.push(chunk);
+            }
+            
+            const manifestData = Buffer.concat(chunks).toString('utf-8');
+            const manifest = JSON.parse(manifestData);
+            
+            return manifest;
+        } catch (error) {
+            if (error.$metadata?.httpStatusCode === 404) {
+                const keyInfo = customKey || `${buildType}/${version}/manifest.json`;
+                throw new Error(`Manifest not found: ${keyInfo}`);
+            }
+            console.error('[R2Uploader] Error getting manifest:', error);
+            throw new Error(`Failed to get manifest: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Promote a version as the current/latest version
+     * Downloads manifest, verifies chunks, updates URLs, and uploads as latest manifest
+     * @param {string} version - Version string to promote
+     * @param {string} buildType - Build type (production/staging)
+     * @param {Function} onProgress - Progress callback
+     * @param {Object} localManifest - Optional local manifest object (if provided, skips R2 fetch)
+     * @returns {Promise<Object>} Result object with success status
+     */
+    async promoteVersion(version, buildType = 'production', onProgress = null, localManifest = null) {
+        try {
+            let manifest;
+            
+            if (localManifest) {
+                // Use provided local manifest
+                if (onProgress) {
+                    onProgress({ percentage: 0, message: `Using local manifest for version ${version}...` });
+                }
+                manifest = localManifest;
+                // Ensure version matches
+                if (manifest.version !== version) {
+                    console.warn(`[R2Uploader] Local manifest version (${manifest.version}) differs from specified version (${version}). Using specified version.`);
+                    manifest.version = version;
+                }
+            } else {
+                // Get manifest from R2
+                if (onProgress) {
+                    onProgress({ percentage: 0, message: `Fetching manifest for version ${version}...` });
+                }
+                manifest = await this.getManifest(version, buildType);
+            }
+            
+            if (onProgress) {
+                onProgress({ percentage: 10, message: `Verifying all chunks exist in R2...` });
+            }
+            
+            // Verify all chunks exist
+            const verificationResult = await this.verifyManifest(manifest, buildType, (progress) => {
+                if (onProgress) {
+                    // Map verification progress to 10-80% of total progress
+                    const mappedProgress = 10 + (progress.percentage * 0.7);
+                    onProgress({ 
+                        percentage: mappedProgress, 
+                        message: progress.message 
+                    });
+                }
+            });
+            
+            if (!verificationResult.allChunksExist) {
+                throw new Error(
+                    `Cannot promote version ${version}: ${verificationResult.missingChunks.length} chunks are missing in R2. ` +
+                    `Please ensure all chunks are uploaded before promoting.`
+                );
+            }
+            
+            if (onProgress) {
+                onProgress({ percentage: 80, message: `Updating chunk URLs and preparing manifest...` });
+            }
+            
+            // Ensure buildType is set
+            manifest.buildType = buildType;
+            
+            // Update chunk URLs to point to the correct version
+            manifest.files.forEach(file => {
+                file.chunks.forEach(chunk => {
+                    const hashPrefix = chunk.hash.substring(0, 2);
+                    chunk.url = `${buildType}/${version}/chunks/${hashPrefix}/${chunk.hash}`;
+                });
+            });
+            
+            // Serialize updated manifest
+            const updatedManifestData = JSON.stringify(manifest, null, 2);
+            
+            if (onProgress) {
+                onProgress({ percentage: 90, message: `Uploading as latest manifest...` });
+            }
+            
+            // Upload as latest manifest
+            const latestKey = `${buildType}/roleplayai_manifest.json`;
+            await this.uploadBuffer(
+                Buffer.from(updatedManifestData, 'utf-8'),
+                latestKey,
+                (progress) => {
+                    if (onProgress) {
+                        onProgress({ 
+                            percentage: 90 + (progress.uploaded ? 10 : 0), 
+                            message: `Uploading latest manifest...` 
+                        });
+                    }
+                }
+            );
+            
+            if (onProgress) {
+                onProgress({ percentage: 100, message: `Version ${version} successfully promoted as latest!` });
+            }
+            
+            return {
+                success: true,
+                version: version,
+                buildType: buildType,
+                latestKey: latestKey,
+                totalChunks: verificationResult.totalChunks,
+                message: `Version ${version} has been promoted as the latest ${buildType} version.`
+            };
+        } catch (error) {
+            console.error('[R2Uploader] Error promoting version:', error);
+            if (onProgress) {
+                onProgress({ percentage: 0, message: `Error: ${error.message}`, error: true });
+            }
+            throw error;
+        }
     }
 }
 
