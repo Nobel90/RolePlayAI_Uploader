@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Generated chunks and manifests (user-generated content)
+chunks/
+*.json
+!package.json
+!package-lock.json
+
+# Game files and binaries (Unreal Engine packages)
+*.pak
+*.exe
+*.dll
+*.pdb
+*.bin
+*.dylib
+*.so
+
+# VS Code
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db
+*.log
+
+# Electron store (may contain sensitive R2 credentials)
+*.db
+*.sqlite
+
+# Temporary files
+*.tmp
+*.temp
+
