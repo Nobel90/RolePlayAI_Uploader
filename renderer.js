@@ -101,6 +101,7 @@ const testR2Btn = document.getElementById('test-r2');
 const startUploadBtn = document.getElementById('start-upload');
 const pauseUploadBtn = document.getElementById('pause-upload');
 const resumeUploadBtn = document.getElementById('resume-upload');
+const verifyUploadBtn = document.getElementById('verify-upload');
 const oldManifestInput = document.getElementById('old-manifest');
 const newManifestInput = document.getElementById('new-manifest');
 const uploadProgressContainer = document.getElementById('upload-progress-container');
@@ -247,7 +248,20 @@ startUploadBtn.addEventListener('click', async () => {
             if (result.success) {
                 addLogEntry('Upload completed successfully!', 'success');
                 addLogEntry(`Uploaded: ${result.stats.uploadedChunks} chunks`, 'success');
-                addLogEntry(`Skipped: ${result.stats.skippedChunks} chunks (already exist)`, 'info');
+                if (result.stats.skippedChunks > 0) {
+                    addLogEntry(`Skipped: ${result.stats.skippedChunks} chunks (already exist)`, 'info');
+                    // Show details of skipped chunks
+                    if (result.stats.skippedChunksDetails && result.stats.skippedChunksDetails.length > 0) {
+                        result.stats.skippedChunksDetails.forEach((chunk, index) => {
+                            if (index < 10) { // Show first 10 for brevity
+                                addLogEntry(`  - ${chunk.hash.substring(0, 16)}... (${chunk.reason})`, 'info');
+                            }
+                        });
+                        if (result.stats.skippedChunksDetails.length > 10) {
+                            addLogEntry(`  ... and ${result.stats.skippedChunksDetails.length - 10} more`, 'info');
+                        }
+                    }
+                }
                 if (result.stats.failedChunks > 0) {
                     addLogEntry(`Failed: ${result.stats.failedChunks} chunks`, 'error');
                 }
@@ -307,6 +321,75 @@ resumeUploadBtn.addEventListener('click', async () => {
     }
 });
 
+// Verify upload button
+verifyUploadBtn.addEventListener('click', async () => {
+    const newManifest = newManifestInput.value;
+    
+    if (!newManifest) {
+        alert('Please select a manifest file to verify');
+        return;
+    }
+    
+    const config = {
+        bucket: document.getElementById('r2-bucket').value,
+        endpoint: document.getElementById('r2-endpoint').value,
+        accessKeyId: document.getElementById('r2-access-key').value,
+        secretAccessKey: document.getElementById('r2-secret-key').value
+    };
+    
+    if (!config.bucket || !config.endpoint || !config.accessKeyId || !config.secretAccessKey) {
+        alert('Please fill in all R2 configuration fields');
+        return;
+    }
+    
+    verifyUploadBtn.disabled = true;
+    verifyUploadBtn.textContent = 'Verifying...';
+    uploadLog.innerHTML = '';
+    uploadProgressContainer.classList.add('active');
+    uploadProgressFill.style.width = '0%';
+    uploadStatusText.textContent = 'Starting verification...';
+    
+    addLogEntry('Starting verification...', 'info');
+    
+    try {
+        const result = await window.electronAPI.verifyUpload({
+            manifestPath: newManifest,
+            config: config
+        });
+        
+        if (result.success) {
+            addLogEntry('Verification complete!', 'success');
+            addLogEntry(`Total chunks: ${result.totalChunks}`, 'info');
+            addLogEntry(`Existing: ${result.existingChunks.length} chunks (${(result.existingSize / 1024 / 1024).toFixed(2)} MB)`, 
+                result.allChunksExist ? 'success' : 'info');
+            
+            if (result.missingChunks.length > 0) {
+                addLogEntry(`Missing: ${result.missingChunks.length} chunks (${(result.missingSize / 1024 / 1024).toFixed(2)} MB)`, 'error');
+                addLogEntry('Missing chunk hashes:', 'error');
+                result.missingChunks.slice(0, 20).forEach(chunk => {
+                    addLogEntry(`  - ${chunk.hash.substring(0, 16)}... (${(chunk.size / 1024).toFixed(2)} KB)`, 'error');
+                });
+                if (result.missingChunks.length > 20) {
+                    addLogEntry(`  ... and ${result.missingChunks.length - 20} more missing chunks`, 'error');
+                }
+            } else {
+                addLogEntry('✓ All chunks verified and exist in R2!', 'success');
+            }
+        } else {
+            throw new Error(result.error || 'Verification failed');
+        }
+    } catch (error) {
+        addLogEntry('Error: ' + error.message, 'error');
+        uploadStatusText.textContent = 'Verification failed: ' + error.message;
+        alert('Verification failed: ' + error.message);
+    } finally {
+        verifyUploadBtn.disabled = false;
+        verifyUploadBtn.textContent = 'Verify Upload';
+        // Keep progress container visible to show final results
+        // It will be hidden when starting a new upload or verification
+    }
+});
+
 function addLogEntry(message, type = 'info') {
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
@@ -336,10 +419,29 @@ window.electronAPI.onProgress((data) => {
             
             uploadStatusText.textContent = statusMessage;
             
-            // Add log entry for upload progress
+            // Add log entry for upload/verify progress
             if (data.message && uploadLog) {
-                const logType = data.error ? 'error' : 'info';
-                addLogEntry(data.message, logType);
+                let logType = data.error ? 'error' : 'info';
+                
+                // Color code verification messages
+                if (data.chunkStatus === 'exists') {
+                    logType = 'success';
+                } else if (data.chunkStatus === 'missing') {
+                    logType = 'error';
+                } else if (data.message.includes('Verification complete') || data.message.includes('✓')) {
+                    logType = 'success';
+                }
+                
+                // Only log detailed chunk status every 10 chunks or on status changes to avoid spam
+                const shouldLog = !data.chunkStatus || 
+                                 (data.currentChunk && data.currentChunk % 10 === 0) ||
+                                 data.chunkStatus === 'missing' ||
+                                 data.message.includes('complete') ||
+                                 data.message.includes('Starting');
+                
+                if (shouldLog) {
+                    addLogEntry(data.message, logType);
+                }
             }
         }
     }

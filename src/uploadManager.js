@@ -152,6 +152,7 @@ class UploadManager {
         const totalChunks = chunksToUpload.length;
         let uploadedChunks = 0;
         let skippedChunks = 0;
+        let skippedChunksDetails = [];
         let failedChunks = 0;
         
         for (let i = 0; i < chunksToUpload.length; i++) {
@@ -183,6 +184,13 @@ class UploadManager {
                     (progress) => {
                         if (progress.skipped) {
                             skippedChunks++;
+                            if (progress.chunkHash) {
+                                skippedChunksDetails.push({
+                                    hash: progress.chunkHash,
+                                    reason: progress.reason || 'already_exists',
+                                    key: progress.key
+                                });
+                            }
                         }
                     }
                 );
@@ -242,6 +250,7 @@ class UploadManager {
                 totalChunks,
                 uploadedChunks,
                 skippedChunks,
+                skippedChunksDetails,
                 failedChunks,
                 filesProcessed: filesToUpload.length
             }

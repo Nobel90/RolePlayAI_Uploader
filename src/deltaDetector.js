@@ -8,9 +8,10 @@ const { parseManifest, getAllChunks } = require('./manifestUtils');
  * Returns: { changedFiles, newFiles, deletedFiles, changedChunks, newChunks }
  */
 function detectDelta(oldManifest, newManifest) {
-    // Parse manifests
-    const oldParsed = parseManifest(oldManifest);
-    const newParsed = parseManifest(newManifest);
+    // Parse manifests with lenient validation (URLs not required for comparison)
+    // URLs are only needed for downloading, not for delta detection
+    const oldParsed = parseManifest(oldManifest, false);
+    const newParsed = parseManifest(newManifest, false);
     
     // Both must be chunk-based manifests
     if (oldParsed.type !== 'chunk-based' || newParsed.type !== 'chunk-based') {

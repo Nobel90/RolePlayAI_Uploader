@@ -23,8 +23,10 @@ function detectManifestType(manifest) {
 
 /**
  * Validate chunk-based manifest structure
+ * @param {Object} manifest - The manifest to validate
+ * @param {boolean} requireUrls - Whether to require URLs in chunks (default: true for Launcher compatibility)
  */
-function validateChunkManifest(manifest) {
+function validateChunkManifest(manifest, requireUrls = true) {
     if (!manifest.version) {
         throw new Error('Manifest missing version');
     }
@@ -52,7 +54,9 @@ function validateChunkManifest(manifest) {
             if (typeof chunk.offset !== 'number') {
                 throw new Error(`Chunk missing offset in file ${file.filename}`);
             }
-            if (!chunk.url) {
+            // Only require URL if explicitly requested (for downloaded manifests from R2)
+            // Local manifests don't have URLs until they're uploaded
+            if (requireUrls && !chunk.url) {
                 throw new Error(`Chunk missing url in file ${file.filename}`);
             }
         }
@@ -93,8 +97,10 @@ function validateFileManifest(manifest) {
 
 /**
  * Parse and validate manifest
+ * @param {string|Object} manifestData - The manifest data (string or object)
+ * @param {boolean} requireUrls - Whether to require URLs in chunks (default: true for Launcher compatibility)
  */
-function parseManifest(manifestData) {
+function parseManifest(manifestData, requireUrls = true) {
     let manifest;
     
     if (typeof manifestData === 'string') {
@@ -106,7 +112,7 @@ function parseManifest(manifestData) {
     const type = detectManifestType(manifest);
     
     if (type === 'chunk-based') {
-        validateChunkManifest(manifest);
+        validateChunkManifest(manifest, requireUrls);
     } else {
         validateFileManifest(manifest);
     }

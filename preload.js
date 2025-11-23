@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testR2Connection: (config) => ipcRenderer.invoke('test-r2-connection', config),
     pauseUpload: () => ipcRenderer.invoke('pause-upload'),
     resumeUpload: () => ipcRenderer.invoke('resume-upload'),
+    verifyUpload: (options) => ipcRenderer.invoke('verify-upload', options),
     
     // Progress events
     onProgress: (callback) => {

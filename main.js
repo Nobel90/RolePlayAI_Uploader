@@ -222,3 +222,33 @@ ipcMain.handle('resume-upload', async () => {
     }
 });
 
+// Verify upload
+ipcMain.handle('verify-upload', async (event, options) => {
+    try {
+        const { manifestPath, config } = options;
+        const { R2Uploader } = require('./src/r2Uploader');
+        const { parseManifest } = require('./src/manifestUtils');
+        
+        // Read manifest with lenient validation (URLs not required for local manifests)
+        // URLs are added during upload, so local manifests don't have them yet
+        const manifestData = await fs.readFile(manifestPath, 'utf-8');
+        const parsed = parseManifest(manifestData, false); // false = don't require URLs for local manifests
+        const manifest = parsed.manifest;
+        const buildType = manifest.buildType || 'production';
+        
+        // Send progress updates to renderer
+        const sendProgress = (data) => {
+            mainWindow.webContents.send('progress-update', data);
+        };
+        
+        // Create uploader and verify
+        const uploader = new R2Uploader(config);
+        const result = await uploader.verifyManifest(manifest, buildType, sendProgress);
+        
+        return { success: true, ...result };
+    } catch (error) {
+        console.error('Error verifying upload:', error);
+        return { success: false, error: error.message };
+    }
+});
+

@@ -267,10 +267,13 @@ class R2Uploader {
                 onProgress({
                     key: r2Key,
                     skipped: true,
-                    message: `Chunk ${chunkHash.substring(0, 8)}... already exists`
+                    message: `Chunk ${chunkHash.substring(0, 8)}... already exists in R2 (deduplication)`,
+                    chunkHash: chunkHash,
+                    reason: 'already_exists'
                 });
             }
-            return { success: true, key: r2Key, skipped: true };
+            console.log(`[R2Uploader] Skipped chunk ${chunkHash.substring(0, 16)}... - already exists at ${r2Key}`);
+            return { success: true, key: r2Key, skipped: true, reason: 'already_exists', chunkHash };
         }
         
         return await this.uploadFile(chunkPath, r2Key, onProgress);
@@ -342,6 +345,96 @@ class R2Uploader {
         // For now, return the R2 endpoint URL
         // In production, you might want to use a Cloudflare public URL
         return `${this.config.endpoint}/${this.config.bucket}/${key}`;
+    }
+    
+    /**
+     * Verify manifest against R2 bucket - check if all chunks exist
+     */
+    async verifyManifest(manifest, buildType = 'production', onProgress = null) {
+        const { getAllChunks } = require('./manifestUtils');
+        const allChunks = getAllChunks(manifest);
+        const version = manifest.version;
+        
+        const results = {
+            totalChunks: allChunks.length,
+            existingChunks: [],
+            missingChunks: [],
+            totalSize: 0,
+            existingSize: 0,
+            missingSize: 0
+        };
+        
+        console.log(`[R2Uploader] Verifying ${allChunks.length} chunks for version ${version}, buildType ${buildType}`);
+        
+        if (onProgress) {
+            onProgress({ percentage: 0, message: `Starting verification of ${allChunks.length} chunks...` });
+        }
+        
+        for (let i = 0; i < allChunks.length; i++) {
+            const chunk = allChunks[i];
+            const hashPrefix = chunk.hash.substring(0, 2);
+            const r2Key = `${buildType}/${version}/chunks/${hashPrefix}/${chunk.hash}`;
+            
+            // Report progress
+            if (onProgress) {
+                const percentage = ((i + 1) / allChunks.length) * 100;
+                onProgress({ 
+                    percentage, 
+                    message: `Checking chunk ${i + 1}/${allChunks.length}: ${chunk.hash.substring(0, 8)}...`,
+                    currentChunk: i + 1,
+                    totalChunks: allChunks.length,
+                    chunkHash: chunk.hash
+                });
+            }
+            
+            const exists = await this.objectExists(r2Key);
+            results.totalSize += chunk.size;
+            
+            if (exists) {
+                results.existingChunks.push({
+                    hash: chunk.hash,
+                    size: chunk.size,
+                    key: r2Key
+                });
+                results.existingSize += chunk.size;
+                
+                if (onProgress) {
+                    onProgress({ 
+                        percentage: ((i + 1) / allChunks.length) * 100,
+                        message: `✓ Chunk ${i + 1}/${allChunks.length} exists (${results.existingChunks.length} found, ${results.missingChunks.length} missing)`,
+                        chunkStatus: 'exists'
+                    });
+                }
+            } else {
+                results.missingChunks.push({
+                    hash: chunk.hash,
+                    size: chunk.size,
+                    key: r2Key
+                });
+                results.missingSize += chunk.size;
+                
+                if (onProgress) {
+                    onProgress({ 
+                        percentage: ((i + 1) / allChunks.length) * 100,
+                        message: `✗ Chunk ${i + 1}/${allChunks.length} missing: ${chunk.hash.substring(0, 16)}...`,
+                        chunkStatus: 'missing',
+                        chunkHash: chunk.hash
+                    });
+                }
+            }
+        }
+        
+        results.verificationComplete = true;
+        results.allChunksExist = results.missingChunks.length === 0;
+        
+        if (onProgress) {
+            onProgress({ 
+                percentage: 100, 
+                message: `Verification complete! ${results.existingChunks.length} found, ${results.missingChunks.length} missing` 
+            });
+        }
+        
+        return results;
     }
 }
 
