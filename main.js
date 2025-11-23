@@ -4,8 +4,13 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const { generateManifest } = require('./src/packagePrep');
+const { detectDelta } = require('./src/deltaDetector');
+const { UploadManager } = require('./src/uploadManager');
+const { R2Uploader } = require('./src/r2Uploader');
 
 let mainWindow;
+let currentUploadManager = null; // Store current upload manager for pause/resume
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -124,6 +129,96 @@ ipcMain.handle('get-file-stats', async (event, filePath) => {
         };
     } catch {
         return { exists: false };
+    }
+});
+
+// Package preparation
+ipcMain.handle('generate-manifest', async (event, options) => {
+    try {
+        // Send progress updates to renderer
+        const sendProgress = (data) => {
+            mainWindow.webContents.send('progress-update', data);
+        };
+        
+        const result = await generateManifest(options, sendProgress);
+        return { success: true, ...result };
+    } catch (error) {
+        console.error('Error generating manifest:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Delta detection
+ipcMain.handle('detect-delta', async (event, oldManifestPath, newManifestPath) => {
+    try {
+        const oldManifestData = await fs.readFile(oldManifestPath, 'utf-8');
+        const newManifestData = await fs.readFile(newManifestPath, 'utf-8');
+        
+        const delta = detectDelta(oldManifestData, newManifestData);
+        return { success: true, delta };
+    } catch (error) {
+        console.error('Error detecting delta:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// R2 connection test
+ipcMain.handle('test-r2-connection', async (event, config) => {
+    try {
+        const uploader = new R2Uploader(config);
+        const result = await uploader.testConnection();
+        return result;
+    } catch (error) {
+        console.error('Error testing R2 connection:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Upload to R2
+ipcMain.handle('upload-to-r2', async (event, options) => {
+    try {
+        const { config, ...uploadOptions } = options;
+        currentUploadManager = new UploadManager(config);
+        
+        // Send progress updates to renderer
+        const sendProgress = (data) => {
+            mainWindow.webContents.send('progress-update', data);
+        };
+        
+        // buildType is already in uploadOptions from renderer
+        const result = await currentUploadManager.upload(uploadOptions, sendProgress);
+        currentUploadManager = null; // Clear reference when done
+        return { success: true, ...result };
+    } catch (error) {
+        console.error('Error uploading to R2:', error);
+        currentUploadManager = null; // Clear reference on error
+        return { success: false, error: error.message };
+    }
+});
+
+// Pause upload
+ipcMain.handle('pause-upload', async () => {
+    try {
+        if (currentUploadManager) {
+            currentUploadManager.pause();
+            return { success: true, message: 'Upload paused' };
+        }
+        return { success: false, message: 'No active upload to pause' };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Resume upload
+ipcMain.handle('resume-upload', async () => {
+    try {
+        if (currentUploadManager) {
+            currentUploadManager.resume();
+            return { success: true, message: 'Upload resumed' };
+        }
+        return { success: false, message: 'No active upload to resume' };
+    } catch (error) {
+        return { success: false, error: error.message };
     }
 });
 

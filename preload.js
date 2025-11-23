@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     detectDelta: (oldManifestPath, newManifestPath) => ipcRenderer.invoke('detect-delta', oldManifestPath, newManifestPath),
     uploadToR2: (options) => ipcRenderer.invoke('upload-to-r2', options),
     testR2Connection: (config) => ipcRenderer.invoke('test-r2-connection', config),
+    pauseUpload: () => ipcRenderer.invoke('pause-upload'),
+    resumeUpload: () => ipcRenderer.invoke('resume-upload'),
     
     // Progress events
     onProgress: (callback) => {
@@ -29,6 +31,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     removeProgressListener: () => {
         ipcRenderer.removeAllListeners('progress-update');
-    }
+    },
+    
+    // Configuration management
+    getConfig: () => ipcRenderer.invoke('get-config'),
+    setBuild: (build) => ipcRenderer.invoke('set-build', build),
+    getR2Config: (build) => ipcRenderer.invoke('get-r2-config', build),
+    setR2Config: (build, config) => ipcRenderer.invoke('set-r2-config', build, config)
 });
 

@@ -234,6 +234,17 @@
             <!-- Tab 1: Package Preparation -->
             <div class="tab-panel active" id="package-prep">
                 <div class="form-group">
+                    <label>Build Type</label>
+                    <select id="build-type-prep">
+                        <option value="production">Production</option>
+                        <option value="staging">Staging</option>
+                    </select>
+                    <small style="color: #888; font-size: 0.85rem; display: block; margin-top: 0.25rem;">
+                        Select the build environment. Production builds are for end users, Staging builds are for testing.
+                    </small>
+                </div>
+
+                <div class="form-group">
                     <label>Source Directory (Unreal Package Output)</label>
                     <div class="input-group">
                         <input type="text" id="source-dir" placeholder="Select source directory..." readonly>
@@ -297,6 +308,17 @@
             <!-- Tab 2: Upload Management -->
             <div class="tab-panel" id="upload">
                 <div class="form-group">
+                    <label>Build Type</label>
+                    <select id="build-type-upload">
+                        <option value="production">Production</option>
+                        <option value="staging">Staging</option>
+                    </select>
+                    <small style="color: #888; font-size: 0.85rem; display: block; margin-top: 0.25rem;">
+                        Select the build environment. Bucket name will be auto-suggested based on build type.
+                    </small>
+                </div>
+
+                <div class="form-group">
                     <label>Previous Version Manifest</label>
                     <div class="input-group">
                         <input type="text" id="old-manifest" placeholder="Select previous manifest..." readonly>
@@ -314,10 +336,10 @@
 
                 <div class="form-group">
                     <label>R2 Configuration</label>
-                    <input type="text" id="r2-bucket" placeholder="Bucket Name" value="vrcentre-roleplay-ai-bucket">
+                    <input type="text" id="r2-bucket" placeholder="Bucket Name (e.g., vrcentre-roleplay-ai-bucket-prod)" value="vrcentre-roleplay-ai-bucket">
                     <input type="text" id="r2-endpoint" placeholder="Endpoint URL" value="https://d9f8ae13b4516b91e13fe7a672fe51b9.r2.cloudflarestorage.com" style="margin-top: 0.5rem;">
                     <input type="text" id="r2-access-key" placeholder="Access Key ID" value="14035e40922cc1e4f1b13de3e4d576cc" style="margin-top: 0.5rem;">
-                    <input type="password" id="r2-secret-key" placeholder="Secret Access Key" value="cbde19fe27e55116e6202ac1dfe9aa6e48cffdd6e951228066b8f1babed61725" style="margin-top: 0.5rem;">
+                    <input type="password" id="r2-secret-key" placeholder="Secret Access Key" value="26673b037116036156792cfd76198aa5987e6731f4f6501a74f9dde9338b8a9b" style="margin-top: 0.5rem;">
                     <button class="btn btn-secondary" id="test-r2" style="margin-top: 0.5rem;">Test Connection</button>
                 </div>
 
@@ -329,7 +351,11 @@
                     </select>
                 </div>
 
-                <button class="btn" id="start-upload">Start Upload</button>
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button class="btn" id="start-upload">Start Upload</button>
+                    <button class="btn btn-secondary" id="pause-upload" style="display: none;">Pause</button>
+                    <button class="btn btn-secondary" id="resume-upload" style="display: none;">Resume</button>
+                </div>
 
                 <div class="progress-container" id="upload-progress-container">
                     <div class="progress-bar">
