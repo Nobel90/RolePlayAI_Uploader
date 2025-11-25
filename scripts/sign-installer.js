@@ -51,6 +51,7 @@ function waitForFileAvailable(filePath, maxRetries = 10, delayMs = 500) {
 
 /**
  * Update latest.yml with new SHA512 checksum and size after signing
+ * Also fixes URL and path to point to correct GitHub release
  * @param {string} distDir - Directory containing latest.yml
  * @param {string} portablePath - Path to the signed portable exe
  */
@@ -65,12 +66,51 @@ function updateLatestYml(distDir, portablePath) {
 
   console.log(`\n[Manifest Update] Updating latest.yml for ${fileName}...`);
 
+  // Read package.json to get version and GitHub repo info
+  const packageJsonPath = path.join(__dirname, '..', 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const version = packageJson.version;
+  const publishConfig = packageJson.build.publish;
+  const owner = publishConfig.owner;
+  const repo = publishConfig.repo;
+
   // Calculate new SHA512 hash and size of signed portable exe
   const fileContent = fs.readFileSync(portablePath);
   const newSha512 = crypto.createHash('sha512').update(fileContent).digest('base64');
   const newSize = fs.statSync(portablePath).size;
 
+  // Generate correct GitHub release URL
+  // Use relative path for electron-updater to construct the full URL correctly
+  // electron-updater will prepend the base URL, so we use just the path part
+  const githubUrl = `https://github.com/${owner}/${repo}/releases/download/v${version}/${fileName}`;
+  
+  // For electron-updater, we need to ensure the URL in latest.yml is correct
+  // If electron-updater is reading from GitHub API, it should use the full URL
+  // But if it's reading from latest.yml, it might need a relative path
+  // Let's use the full URL as electron-updater should handle it correctly
+
   let yamlContent = fs.readFileSync(yamlPath, 'utf8');
+  
+  // Update version
+  const versionRegex = /(version:\s*)([\d.]+)/;
+  if (versionRegex.test(yamlContent)) {
+    yamlContent = yamlContent.replace(versionRegex, `$1${version}`);
+    console.log(`[Manifest Update] Updated version to ${version}`);
+  }
+  
+  // Update URL in files array
+  const urlRegex = /(url:\s*)([^\n]+)/;
+  if (urlRegex.test(yamlContent)) {
+    yamlContent = yamlContent.replace(urlRegex, `$1${githubUrl}`);
+    console.log(`[Manifest Update] Updated URL to: ${githubUrl}`);
+  }
+  
+  // Update path
+  const pathRegex = /(path:\s*)([^\n]+)/;
+  if (pathRegex.test(yamlContent)) {
+    yamlContent = yamlContent.replace(pathRegex, `$1${fileName}`);
+    console.log(`[Manifest Update] Updated path to: ${fileName}`);
+  }
   
   // Find and update SHA512 checksum
   // Pattern: sha512: <hash>

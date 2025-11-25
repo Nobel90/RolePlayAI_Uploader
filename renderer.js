@@ -671,3 +671,264 @@ promoteVersionBtn.addEventListener('click', async () => {
     }
 });
 
+// Auto-updater functionality
+const checkUpdatesBtn = document.getElementById('check-updates-btn');
+const downloadInstallBtn = document.getElementById('download-install-btn');
+const updateStatus = document.getElementById('update-status');
+const updateIcon = document.getElementById('update-icon');
+const updateText = document.getElementById('update-text');
+const installIcon = document.getElementById('install-icon');
+const installText = document.getElementById('install-text');
+const updateLogContainer = document.getElementById('update-log-container');
+const updateLogContent = document.getElementById('update-log-content');
+const toggleUpdateLogBtn = document.getElementById('toggle-update-log');
+
+let updateDownloaded = false;
+let updateLogExpanded = true;
+let updateAvailable = false;
+
+// Update log functions
+function addUpdateLog(message, type = 'info') {
+    if (!updateLogContent) return;
+    
+    const time = new Date().toLocaleTimeString();
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${type}`;
+    logEntry.innerHTML = `<span class="log-time">[${time}]</span>${message}`;
+    
+    updateLogContent.appendChild(logEntry);
+    updateLogContent.scrollTop = updateLogContent.scrollHeight;
+    
+    // Show log container if hidden
+    if (updateLogContainer && updateLogContainer.style.display === 'none') {
+        updateLogContainer.style.display = 'flex';
+    }
+}
+
+function clearUpdateLog() {
+    if (updateLogContent) {
+        updateLogContent.innerHTML = '';
+    }
+}
+
+// Toggle log container
+if (toggleUpdateLogBtn) {
+    toggleUpdateLogBtn.addEventListener('click', () => {
+        updateLogExpanded = !updateLogExpanded;
+        const content = updateLogContent;
+        if (content) {
+            if (updateLogExpanded) {
+                content.style.display = 'block';
+                toggleUpdateLogBtn.textContent = '−';
+            } else {
+                content.style.display = 'none';
+                toggleUpdateLogBtn.textContent = '+';
+            }
+        }
+    });
+}
+
+// Handle manual update check
+checkUpdatesBtn.addEventListener('click', async () => {
+    console.log('[Update] Manual update check button clicked');
+    addUpdateLog('Manual update check initiated...', 'info');
+    
+    checkUpdatesBtn.disabled = true;
+    updateText.textContent = 'Checking...';
+    updateIcon.textContent = '⏳';
+    updateStatus.style.display = 'none';
+    
+    try {
+        addUpdateLog('Calling checkForUpdates IPC handler...', 'info');
+        const result = await window.electronAPI.checkForUpdates();
+        
+        if (!result.success) {
+            addUpdateLog(`Update check failed: ${result.error || 'Unknown error'}`, 'error');
+            showUpdateStatus('error', `Error: ${result.error || 'Failed to check for updates'}`);
+            checkUpdatesBtn.disabled = false;
+            updateText.textContent = 'Check Updates';
+            updateIcon.textContent = '🔄';
+        } else {
+            addUpdateLog('Update check initiated successfully. Waiting for response...', 'success');
+        }
+        // Status will be updated via auto-updater events
+    } catch (error) {
+        console.error('Error checking for updates:', error);
+        addUpdateLog(`Exception during update check: ${error.message || 'Unknown error'}`, 'error');
+        
+        // Ignore ENOENT errors for YML files - we're using GitHub API only
+        if (error.message && error.message.includes('app-update.yml') && error.message.includes('ENOENT')) {
+            addUpdateLog('Ignoring YML file error (using GitHub API only)', 'info');
+            // Silently ignore - we're using GitHub API directly
+            checkUpdatesBtn.disabled = false;
+            updateText.textContent = 'Check Updates';
+            updateIcon.textContent = '🔄';
+            return;
+        }
+        
+        showUpdateStatus('error', `Error: ${error.message || 'Failed to check for updates'}`);
+        checkUpdatesBtn.disabled = false;
+        updateText.textContent = 'Check Updates';
+        updateIcon.textContent = '🔄';
+    }
+});
+
+// Listen for auto-updater status events
+window.electronAPI.onAutoUpdaterStatus((data) => {
+    const { status, info, progress, error, logMessage } = data;
+    
+    // Add log message if provided
+    if (logMessage) {
+        const logType = status === 'error' ? 'error' : (status === 'update-available' ? 'success' : 'info');
+        addUpdateLog(logMessage, logType);
+    }
+    
+    switch (status) {
+        case 'checking':
+            addUpdateLog('Checking for updates...', 'info');
+            updateStatus.style.display = 'block';
+            updateStatus.className = 'update-status checking';
+            updateStatus.textContent = 'Checking for updates...';
+            updateIcon.textContent = '⏳';
+            updateText.textContent = 'Checking...';
+            break;
+            
+        case 'update-available':
+            updateAvailable = true;
+            const version = info?.version || 'new version';
+            addUpdateLog(`Update available: v${version}`, 'success');
+            updateStatus.style.display = 'block';
+            updateStatus.className = 'update-status available';
+            updateStatus.textContent = `Update available: v${version}`;
+            updateIcon.textContent = '⬇️';
+            updateText.textContent = 'Update Available';
+            checkUpdatesBtn.disabled = false;
+            // Show download & install button
+            if (downloadInstallBtn) {
+                downloadInstallBtn.style.display = 'block';
+                installText.textContent = 'Download & Install';
+                installIcon.textContent = '⬇️';
+            }
+            break;
+            
+        case 'update-not-available':
+            updateAvailable = false;
+            addUpdateLog('No updates available. Current version is up to date.', 'info');
+            updateStatus.style.display = 'block';
+            updateStatus.className = 'update-status up-to-date';
+            updateStatus.textContent = 'You are up to date!';
+            updateIcon.textContent = '✅';
+            updateText.textContent = 'Check Updates';
+            checkUpdatesBtn.disabled = false;
+            // Hide download & install button
+            if (downloadInstallBtn) {
+                downloadInstallBtn.style.display = 'none';
+            }
+            break;
+            
+        case 'download-progress':
+            if (progress) {
+                const percent = Math.round(progress.percent || 0);
+                const mbTransferred = (progress.transferred / (1024 * 1024)).toFixed(1);
+                const mbTotal = (progress.total / (1024 * 1024)).toFixed(1);
+                addUpdateLog(`Downloading: ${percent}% (${mbTransferred}MB / ${mbTotal}MB)`, 'info');
+                updateStatus.style.display = 'block';
+                updateStatus.className = 'update-status downloading';
+                updateStatus.textContent = `Downloading: ${percent}% (${mbTransferred}MB / ${mbTotal}MB)`;
+                updateIcon.textContent = '⬇️';
+                updateText.textContent = 'Downloading...';
+                // Show download & install button during download (disabled)
+                if (downloadInstallBtn && updateAvailable) {
+                    downloadInstallBtn.style.display = 'block';
+                    downloadInstallBtn.disabled = true;
+                    installText.textContent = `Downloading... ${percent}%`;
+                    installIcon.textContent = '⏳';
+                }
+            }
+            break;
+            
+        case 'update-downloaded':
+            updateDownloaded = true;
+            addUpdateLog('Update downloaded successfully! Ready to install.', 'success');
+            updateStatus.style.display = 'block';
+            updateStatus.className = 'update-status downloaded';
+            updateStatus.textContent = 'Update downloaded! Ready to install.';
+            updateIcon.textContent = '✅';
+            updateText.textContent = 'Check Updates';
+            checkUpdatesBtn.disabled = false;
+            
+            // Update download & install button to show ready state
+            if (downloadInstallBtn) {
+                downloadInstallBtn.style.display = 'block';
+                downloadInstallBtn.disabled = false;
+                installText.textContent = 'Install & Restart';
+                installIcon.textContent = '🚀';
+            }
+            break;
+            
+        case 'error':
+            if (!updateDownloaded) {
+                // Ignore ENOENT errors for YML files - we're using GitHub API only
+                if (error && error.includes('app-update.yml') && error.includes('ENOENT')) {
+                    addUpdateLog('Ignoring YML file error (using GitHub API only)', 'info');
+                    // Silently ignore this error - we're using GitHub API directly
+                    console.log('Ignoring YML file error in renderer');
+                    checkUpdatesBtn.disabled = false;
+                    updateText.textContent = 'Check Updates';
+                    updateIcon.textContent = '🔄';
+                    // Don't show the error status
+                    return;
+                }
+                
+                addUpdateLog(`Update error: ${error || 'Unknown error'}`, 'error');
+                updateStatus.style.display = 'block';
+                updateStatus.className = 'update-status error';
+                updateStatus.textContent = error || 'Update check failed';
+                updateIcon.textContent = '❌';
+                updateText.textContent = 'Check Updates';
+                checkUpdatesBtn.disabled = false;
+            }
+            break;
+    }
+});
+
+function showUpdateStatus(type, message) {
+    updateStatus.style.display = 'block';
+    updateStatus.className = `update-status ${type}`;
+    updateStatus.textContent = message;
+}
+
+// Handle download & install button click
+if (downloadInstallBtn) {
+    downloadInstallBtn.addEventListener('click', async () => {
+        console.log('[Update] Download & Install button clicked');
+        addUpdateLog('Download & Install button clicked...', 'info');
+        
+        downloadInstallBtn.disabled = true;
+        installText.textContent = 'Processing...';
+        installIcon.textContent = '⏳';
+        
+        try {
+            const result = await window.electronAPI.downloadAndInstallUpdate();
+            
+            if (!result.success) {
+                addUpdateLog(`Download & Install failed: ${result.error || 'Unknown error'}`, 'error');
+                showUpdateStatus('error', `Error: ${result.error || 'Failed to download and install'}`);
+                downloadInstallBtn.disabled = false;
+                installText.textContent = updateDownloaded ? 'Install & Restart' : 'Download & Install';
+                installIcon.textContent = updateDownloaded ? '🚀' : '⬇️';
+            } else {
+                addUpdateLog('Download & Install initiated successfully. App will close and restart...', 'success');
+                // App will close automatically, so we don't need to re-enable the button
+            }
+        } catch (error) {
+            console.error('Error in download and install:', error);
+            addUpdateLog(`Exception during download & install: ${error.message || 'Unknown error'}`, 'error');
+            showUpdateStatus('error', `Error: ${error.message || 'Failed to download and install'}`);
+            downloadInstallBtn.disabled = false;
+            installText.textContent = updateDownloaded ? 'Install & Restart' : 'Download & Install';
+            installIcon.textContent = updateDownloaded ? '🚀' : '⬇️';
+        }
+    });
+}
+

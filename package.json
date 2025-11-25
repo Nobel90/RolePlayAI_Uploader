@@ -1,6 +1,6 @@
 {
   "name": "role-play-ai-uploader",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Role-Play-AI Uploader - Package preparation and R2 upload tool",
   "main": "main.js",
   "scripts": {
@@ -21,7 +21,7 @@
     "publish": {
       "provider": "github",
       "owner": "Nobel90",
-      "repo": "Role-Play-AI_Uploader",
+      "repo": "RolePlayAI_Uploader",
       "private": false
     },
     "appId": "com.role-play-ai.uploader",

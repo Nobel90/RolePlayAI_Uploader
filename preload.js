@@ -45,6 +45,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setR2Config: (build, config) => ipcRenderer.invoke('set-r2-config', build, config),
     
     // Authentication
-    login: (credentials) => ipcRenderer.invoke('login', credentials)
+    login: (credentials) => ipcRenderer.invoke('login', credentials),
+    
+    // Auto-updater
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    restartAndInstall: () => ipcRenderer.invoke('restart-and-install'),
+    downloadAndInstallUpdate: () => ipcRenderer.invoke('download-and-install-update'),
+    
+    // Auto-updater events
+    onAutoUpdaterStatus: (callback) => {
+        ipcRenderer.on('auto-updater-status', (event, data) => callback(data));
+    },
+    removeAutoUpdaterListener: () => {
+        ipcRenderer.removeAllListeners('auto-updater-status');
+    }
 });
 
