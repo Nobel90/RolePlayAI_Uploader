@@ -2,6 +2,8 @@
 // Electron main process for RolePlayAI Uploader
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
 const path = require('path');
 const fs = require('fs').promises;
 const { generateManifest } = require('./src/packagePrep');
@@ -10,7 +12,45 @@ const { UploadManager } = require('./src/uploadManager');
 const { R2Uploader } = require('./src/r2Uploader');
 
 let mainWindow;
+let loginWindow;
 let currentUploadManager = null; // Store current upload manager for pause/resume
+let updateDownloaded = false; // Track if update was successfully downloaded
+
+// Login credentials
+const ADMIN_USERNAME = 'Admin';
+const ADMIN_PASSWORD = 'Mostafa';
+
+function createLoginWindow() {
+    loginWindow = new BrowserWindow({
+        width: 480,
+        height: 520,
+        resizable: false,
+        frame: true,
+        autoHideMenuBar: true,
+        center: true,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        },
+        icon: path.join(__dirname, 'assets', 'icon-white_s.ico'),
+        show: false
+    });
+
+    loginWindow.loadFile('login.html');
+
+    loginWindow.once('ready-to-show', () => {
+        loginWindow.show();
+    });
+
+    loginWindow.on('closed', () => {
+        loginWindow = null;
+        // If login window is closed without successful login, quit the app
+        if (!mainWindow) {
+            app.quit();
+        }
+    });
+}
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -21,23 +61,46 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true
         },
-        icon: path.join(__dirname, 'assets', 'icon.png')
+        icon: path.join(__dirname, 'assets', 'icon-white_s.ico'),
+        show: false
     });
 
     mainWindow.loadFile('index.html');
+
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+        // Close login window if it's still open
+        if (loginWindow) {
+            loginWindow.close();
+        }
+    });
 
     // Open DevTools in development
     if (process.env.NODE_ENV === 'development') {
         mainWindow.webContents.openDevTools();
     }
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 }
 
+// Configure auto-updater
+autoUpdater.logger = log;
+log.transports.file.level = "info";
+
 app.whenReady().then(() => {
-    createWindow();
+    // Show login window first
+    createLoginWindow();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+            // If no windows, show login again
+            if (!mainWindow) {
+                createLoginWindow();
+            } else {
+                createWindow();
+            }
         }
     });
 });
@@ -45,6 +108,134 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
+    }
+});
+
+// Login handler
+ipcMain.handle('login', async (event, credentials) => {
+    const { username, password } = credentials;
+    
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        // Login successful - create main window
+        createWindow();
+        
+        // Check for updates after main window is ready
+        setTimeout(() => {
+            if (mainWindow) {
+                autoUpdater.checkForUpdates();
+            }
+        }, 1000);
+        
+        return { success: true };
+    } else {
+        return { success: false, error: 'Invalid username or password' };
+    }
+});
+
+// Auto-updater event handlers
+autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for update...');
+    log.info('Checking for update...');
+    if (mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { status: 'checking' });
+    }
+});
+
+autoUpdater.on('update-available', (info) => {
+    console.log('Update available.');
+    log.info('Update available:', info);
+    updateDownloaded = false; // Reset flag when new update is available
+    if (mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { status: 'update-available', info });
+    }
+});
+
+autoUpdater.on('update-not-available', (info) => {
+    console.log('Update not available.');
+    log.info('Update not available. Current version is up to date.');
+    updateDownloaded = false; // Reset flag
+    if (mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { status: 'update-not-available' });
+    }
+});
+
+autoUpdater.on('error', (err) => {
+    console.log('Error in auto-updater. ' + err);
+    log.error('Auto-updater error:', err);
+    
+    // Don't show error if update was already successfully downloaded
+    if (!updateDownloaded && mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { 
+            status: 'error', 
+            error: err.message || 'Unknown error occurred during update check'
+        });
+    } else if (updateDownloaded) {
+        log.info('Error occurred after update was downloaded (likely during installation):', err.message);
+    }
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+    let log_message = "Download speed: " + progressObj.bytesPerSecond;
+    log_message = log_message + ' - Downloaded ' + progressObj.percent + '%';
+    log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
+    console.log(log_message);
+    if (mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { 
+            status: 'download-progress', 
+            progress: {
+                percent: progressObj.percent,
+                transferred: progressObj.transferred,
+                total: progressObj.total,
+                bytesPerSecond: progressObj.bytesPerSecond
+            }
+        });
+    }
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded');
+    log.info('Update downloaded successfully:', info);
+    updateDownloaded = true; // Mark that update was successfully downloaded
+    
+    if (mainWindow) {
+        mainWindow.webContents.send('auto-updater-status', { status: 'update-downloaded', info });
+        
+        // Show dialog with error handling
+        dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Update Ready',
+            message: 'Update downloaded',
+            detail: 'A new version has been downloaded. The application will restart to apply the update.',
+            buttons: ['Restart Now', 'Later']
+        }).then((result) => {
+            if (result.response === 0) {
+                autoUpdater.quitAndInstall();
+            }
+        }).catch((error) => {
+            log.error('Error showing update dialog:', error);
+        });
+    }
+});
+
+// IPC handler for manual update check
+ipcMain.handle('check-for-updates', async () => {
+    try {
+        await autoUpdater.checkForUpdates();
+        return { success: true };
+    } catch (error) {
+        log.error('Error checking for updates:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// IPC handler for restart and install update
+ipcMain.handle('restart-and-install', async () => {
+    try {
+        autoUpdater.quitAndInstall();
+        return { success: true };
+    } catch (error) {
+        log.error('Error restarting and installing update:', error);
+        return { success: false, error: error.message };
     }
 });
 

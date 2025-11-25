@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfig: () => ipcRenderer.invoke('get-config'),
     setBuild: (build) => ipcRenderer.invoke('set-build', build),
     getR2Config: (build) => ipcRenderer.invoke('get-r2-config', build),
-    setR2Config: (build, config) => ipcRenderer.invoke('set-r2-config', build, config)
+    setR2Config: (build, config) => ipcRenderer.invoke('set-r2-config', build, config),
+    
+    // Authentication
+    login: (credentials) => ipcRenderer.invoke('login', credentials)
 });
 
